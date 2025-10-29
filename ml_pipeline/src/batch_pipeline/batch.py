@@ -3,6 +3,7 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, r2_score
+from AS.ml_pipeline.src.utils.summarize_metrics import summarize_metrics
 import time
 import os
 
@@ -47,7 +48,10 @@ def main():
         })
 
     metrics_df = pd.DataFrame(metrics)
-    metrics_df.to_csv(os.path.join(results_dir, 'batch_metrics_summary.csv'), index=False)
+    summary_path = os.path.join(results_dir, 'batch_metrics_summary.csv')
+    metrics_df.to_csv(summary_path, index=False)
+
+    summarize_metrics(metrics, os.path.join(results_dir, 'batch_metrics_overview.csv'))
 
     print("Batch processing completed with results saved in", results_dir)
 
