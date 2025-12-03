@@ -2,8 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_squared_error, r2_score
-from AS.ml_pipeline.src.utils.summarize_metrics import summarize_metrics
+from AS.ml_pipeline.src.utils.system_metrics import SystemMetricsTracker
 import time
 import os
 
@@ -14,13 +13,19 @@ def main():
 
     model = LinearRegression()
     scaler = StandardScaler()
+    batch_size = 100
 
-    batch_size = 10000
-    metrics = []
+    tracker = SystemMetricsTracker()
 
-    for chunk_number, chunk in enumerate(pd.read_csv(data_path, chunksize=batch_size)):
-        start_time = time.time()
+    total_records = 0
+    sum_y = 0.0
+    sum_y_sq = 0.0
+    ss_res = 0.0
+    mae_sum = 0.0
 
+    total_start = time.perf_counter()
+
+    for chunk_number, chunk in enumerate(pd.read_csv(data_path, chunksize=batch_size), start=1):
         chunk.ffill(inplace=True)
         features = ['memory_usage', 'disk_io', 'network_io']
         X = chunk[features]
@@ -30,30 +35,47 @@ def main():
         model.fit(X_scaled, y)
         y_pred = model.predict(X_scaled)
 
-        mse = mean_squared_error(y, y_pred)
-        r2 = r2_score(y, y_pred)
+        errors = y.values - y_pred
+        ss_res += np.sum(errors ** 2)
+        mae_sum += np.sum(np.abs(errors))
+        sum_y += y.sum()
+        sum_y_sq += np.sum(y.values ** 2)
+        total_records += len(chunk)
 
-        elapsed_time = time.time() - start_time
-        print(f"Batch {chunk_number+1}: Time={elapsed_time:.3f}s, MSE={mse:.4f}, R^2={r2:.4f}")
+        tracker.sample_memory()
 
         result_df = chunk.copy()
         result_df['prediction'] = y_pred
-        result_df.to_csv(os.path.join(results_dir, f'batch_{chunk_number+1}_results.csv'), index=False)
+        result_df.to_csv(os.path.join(results_dir, f'batch_{chunk_number}_results.csv'), index=False)
 
-        metrics.append({
-            'batch': chunk_number + 1,
-            'time_sec': elapsed_time,
-            'mse': mse,
-            'r2': r2
-        })
+    total_time = time.perf_counter() - total_start
+    metrics = {
+        'pipeline': 'batch',
+        'records_processed': total_records,
+        'mse': (ss_res / total_records) if total_records else None,
+        'mae': (mae_sum / total_records) if total_records else None,
+        'accuracy_r2': None,
+    }
 
-    metrics_df = pd.DataFrame(metrics)
-    summary_path = os.path.join(results_dir, 'batch_metrics_summary.csv')
-    metrics_df.to_csv(summary_path, index=False)
+    if total_records:
+        ss_tot = sum_y_sq - (sum_y ** 2) / total_records
+        if ss_tot > 0:
+            metrics['accuracy_r2'] = 1 - (ss_res / ss_tot)
+        else:
+            metrics['accuracy_r2'] = 0.0
 
-    summarize_metrics(metrics, os.path.join(results_dir, 'batch_metrics_overview.csv'))
+    system_stats = tracker.finish()
+    metrics.update({
+        'wall_time_sec': total_time,
+        'cpu_time_sec': system_stats['cpu_time_sec'],
+        'avg_cpu_percent': system_stats['avg_cpu_percent'],
+        'peak_memory_mb': system_stats['peak_rss_bytes'] / (1024 * 1024)
+    })
 
-    print("Batch processing completed with results saved in", results_dir)
+    metrics_path = os.path.join(results_dir, 'pipeline_metrics.csv')
+    pd.DataFrame([metrics]).to_csv(metrics_path, index=False)
+
+    print(f"Total processing time for batch pipeline: {total_time:.3f}s")
 
 
 if __name__ == '__main__':

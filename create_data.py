@@ -8,7 +8,7 @@ data_dir = 'ml_pipeline/data'
 os.makedirs(data_dir, exist_ok=True)
 
 # Parameters for data generation
-n = 1000000  # number of data points
+n = 1000  # number of data points
 np.random.seed(42)
 
 # Generate timestamps spaced by seconds backwards from now
